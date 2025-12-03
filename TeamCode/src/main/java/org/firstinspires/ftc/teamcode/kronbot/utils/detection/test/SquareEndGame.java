@@ -10,82 +10,86 @@ import java.util.List;
 
 public class SquareEndGame extends OpenCvPipeline {
 
-    private final Mat hsv = new Mat();
-    private final Mat mask = new Mat();
-    private final Mat hierarchy = new Mat();
-    private final List<MatOfPoint> contours = new ArrayList<>();
+    private final Mat hsvMat = new Mat();
+    private final Mat colorMaskMat = new Mat();
+    private final Mat contourHierarchyMat = new Mat();
+    private final List<MatOfPoint> contourList = new ArrayList<>();
 
     // minimum area to consider (adjust as needed)
-    private static final double MIN_QUAD_AREA = 1000.0;
+    private static final double MIN_QUADRILATERAL_AREA = 1000.0;
+
+    // HSV ranges tuned for very bright lighting to detect blue
+    // H: 100-130, S: 180-255, V: 200-255
+    private static final Scalar HSV_LOWER_BLUE = new Scalar(80, 20, 100);
+    private static final Scalar HSV_UPPER_BLUE = new Scalar(135, 255, 255);
 
     // Expose a simple count of detected contours (updated each frame)
-    private volatile int detectedContourCount = 0;
+    private volatile int detectedQuadCount = 0;
 
     @Override
-    public Mat processFrame(Mat input) {
-        Imgproc.cvtColor(input, hsv, Imgproc.COLOR_RGB2HSV);
-        Scalar low  = new Scalar(90, 120, 80);
-        Scalar high = new Scalar(125, 255, 255);
-        Core.inRange(hsv, low, high, mask);
+    public Mat processFrame(Mat frame) {
+        Imgproc.cvtColor(frame, hsvMat, Imgproc.COLOR_RGB2HSV);
+        // Use named constants for the inRange bounds (tuned for bright blue)
+        Core.inRange(hsvMat, HSV_LOWER_BLUE, HSV_UPPER_BLUE, colorMaskMat);
 
-        Mat kernel = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(5, 5));
-        Imgproc.morphologyEx(mask, mask, Imgproc.MORPH_OPEN, kernel);
-        Imgproc.morphologyEx(mask, mask, Imgproc.MORPH_CLOSE, kernel);
+        Mat morphKernel = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(5, 5));
+        Imgproc.morphologyEx(colorMaskMat, colorMaskMat, Imgproc.MORPH_OPEN, morphKernel);
+        Imgproc.morphologyEx(colorMaskMat, colorMaskMat, Imgproc.MORPH_CLOSE, morphKernel);
 
-        contours.clear();
-        Imgproc.findContours(mask, contours, hierarchy, Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE);
+        contourList.clear();
+        Imgproc.findContours(colorMaskMat, contourList, contourHierarchyMat, Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE);
 
-        MatOfPoint largestQuad = null;
-        double maxArea = 0.0;
+        MatOfPoint largestQuadrilateral = null;
+        double largestArea = 0.0;
 
-        for (MatOfPoint contour : contours) {
-            MatOfPoint2f contour2f = new MatOfPoint2f(contour.toArray());
-            double peri = Imgproc.arcLength(contour2f, true);
-            MatOfPoint2f approxCurve = new MatOfPoint2f();
-            Imgproc.approxPolyDP(contour2f, approxCurve, 0.02 * peri, true);
+        for (MatOfPoint contour : contourList) {
+            MatOfPoint2f contourFloat = new MatOfPoint2f(contour.toArray());
+            double peri = Imgproc.arcLength(contourFloat, true);
+            MatOfPoint2f approxCurve2f = new MatOfPoint2f();
+            Imgproc.approxPolyDP(contourFloat, approxCurve2f, 0.02 * peri, true);
 
-            int vertices = (int) approxCurve.total();
+            int vertices = (int) approxCurve2f.total();
             // corrected: look for 4 vertices (quadrilateral)
             if (vertices == 4) {
-                MatOfPoint approxMat = new MatOfPoint(approxCurve.toArray());
-                if (Imgproc.isContourConvex(approxMat)) {
-                    double area = Math.abs(Imgproc.contourArea(approxMat));
-                    if (area > MIN_QUAD_AREA && area > maxArea) {
-                        maxArea = area;
-                        if (largestQuad != null) {
-                            largestQuad.release();
+                MatOfPoint approxPolygon = new MatOfPoint(approxCurve2f.toArray());
+                if (Imgproc.isContourConvex(approxPolygon)) {
+                    double area = Math.abs(Imgproc.contourArea(approxPolygon));
+                    if (area > MIN_QUADRILATERAL_AREA && area > largestArea) {
+                        largestArea = area;
+                        if (largestQuadrilateral != null) {
+                            largestQuadrilateral.release();
                         }
-                        largestQuad = approxMat; // take ownership; do not release here
+                        largestQuadrilateral = approxPolygon; // take ownership; do not release here
                     } else {
-                        approxMat.release();
+                        approxPolygon.release();
                     }
                 } else {
-                    approxMat.release();
+                    approxPolygon.release();
                 }
             }
 
-            contour2f.release();
-            approxCurve.release();
+            contourFloat.release();
+            approxCurve2f.release();
         }
 
-        if (largestQuad != null) {
-            // use Arrays.asList for Java 8 / Android compatibility
-            Imgproc.drawContours(input, Arrays.asList(largestQuad), -1, new Scalar(0, 255, 0), 3);
-            detectedContourCount = 1;
-            largestQuad.release();
+        if (largestQuadrilateral != null) {
+            Imgproc.drawContours(frame, Arrays.asList(largestQuadrilateral), -1, new Scalar(0, 255, 0), 3);
+            detectedQuadCount = 1;
+            largestQuadrilateral.release();
         } else {
-            detectedContourCount = 0;
+            detectedQuadCount = 0;
         }
 
-        kernel.release();
-        return input;
+        morphKernel.release();
+        // return the original frame (with contours drawn) so the overlays are visible
+        return frame;
     }
 
     /**
      * Returns the number of contours considered as squares/rectangles detected in the last processed frame.
      */
-    public int getDetectedCount() {
-        return detectedContourCount;
+    public int getDetectedQuadCount() {
+        return detectedQuadCount;
     }
 
 }
