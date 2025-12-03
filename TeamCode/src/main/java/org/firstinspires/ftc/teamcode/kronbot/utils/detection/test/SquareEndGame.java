@@ -13,6 +13,9 @@ public class SquareEndGame extends OpenCvPipeline {
     private final Mat hierarchy = new Mat();
     private final List<MatOfPoint> contours = new ArrayList<>();
 
+    // Expose a simple count of detected contours (updated each frame)
+    private volatile int detectedContourCount = 0;
+
     @Override
     public Mat processFrame(Mat input) {
         Imgproc.cvtColor(input, hsv, Imgproc.COLOR_RGB2HSV);
@@ -24,6 +27,8 @@ public class SquareEndGame extends OpenCvPipeline {
         Imgproc.morphologyEx(mask, mask, Imgproc.MORPH_CLOSE, kernel);
         contours.clear();
         Imgproc.findContours(mask, contours, hierarchy, Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE);
+
+        /*int drawCount = 0;
         for (MatOfPoint contour : contours) {
             MatOfPoint2f contour2f = new MatOfPoint2f(contour.toArray());
             double peri = Imgproc.arcLength(contour2f, true);
@@ -31,12 +36,24 @@ public class SquareEndGame extends OpenCvPipeline {
             Imgproc.approxPolyDP(contour2f, approxCurve, 0.02 * peri, true);
 
             int vertices = (int) approxCurve.total();
-            if (vertices >= 0 && vertices <= 4) {
+            if (vertices >= 0 && vertices <= 8) {
                 Imgproc.drawContours(input, List.of(new MatOfPoint(approxCurve.toArray())), -1, new Scalar(255, 0, 0), 3);
+                drawCount++;
             }
 
         }
-        return input;
+
+        // update volatile count so OpMode can read it
+        detectedContourCount = drawCount;*/
+
+        return mask;
+    }
+
+    /**
+     * Returns the number of contours considered as squares/rectangles detected in the last processed frame.
+     */
+    public int getDetectedCount() {
+        return detectedContourCount;
     }
 
 }
