@@ -1,126 +1,59 @@
-package org.firstinspires.ftc.teamcode.kronbot.utils.detection.test;
+package org.firstinspires.ftc.teamcode.kronbot.utils.detection;
 
 import org.opencv.core.*;
 import org.opencv.imgproc.Imgproc;
 import org.openftc.easyopencv.OpenCvPipeline;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 
 public class SquareEndGame extends OpenCvPipeline {
 
-    private final Mat hsvMat = new Mat();
-    private final Mat colorMaskMat = new Mat();
-    private final Mat contourHierarchyMat = new Mat();
-    private final List<MatOfPoint> contourList = new ArrayList<>();
+    private final Mat hsv = new Mat();
+    private final Mat mask = new Mat();
+    private final Mat hierarchy = new Mat();
+    private final List<MatOfPoint> contours = new ArrayList<>();
 
-    private static final double MIN_QUADRILATERAL_AREA = 1000.0;
-
-    private static final Scalar HSV_LOWER_BLUE = new Scalar(80, 20, 100);
-    private static final Scalar HSV_UPPER_BLUE = new Scalar(135, 255, 255);
-
-    private volatile int detectedQuadCount = 0;
-    private volatile double detectedAngle = 0.0;
+    // Expose a simple count of detected contours (updated each frame)
+    private volatile int detectedContourCount = 0;
 
     @Override
-    public Mat processFrame(Mat frame) {
-        Imgproc.cvtColor(frame, hsvMat, Imgproc.COLOR_RGB2HSV);
-        Core.inRange(hsvMat, HSV_LOWER_BLUE, HSV_UPPER_BLUE, colorMaskMat);
+    public Mat processFrame(Mat input) {
+        Imgproc.cvtColor(input, hsv, Imgproc.COLOR_RGB2HSV);
+        Scalar low  = new Scalar(90, 100, 50);
+        Scalar high = new Scalar(145, 255, 255);
+        Core.inRange(hsv, low, high, mask);
+        Mat kernel = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(5, 5));
+        Imgproc.morphologyEx(mask, mask, Imgproc.MORPH_OPEN, kernel);
+        Imgproc.morphologyEx(mask, mask, Imgproc.MORPH_CLOSE, kernel);
+        contours.clear();
+        Imgproc.findContours(mask, contours, hierarchy, Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE);
 
-        Mat morphKernel = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(5, 5));
-        Imgproc.morphologyEx(colorMaskMat, colorMaskMat, Imgproc.MORPH_OPEN, morphKernel);
-        Imgproc.morphologyEx(colorMaskMat, colorMaskMat, Imgproc.MORPH_CLOSE, morphKernel);
+        int drawCount = 0;
+        for (MatOfPoint contour : contours) {
+            MatOfPoint2f contour2f = new MatOfPoint2f(contour.toArray());
+            double peri = Imgproc.arcLength(contour2f, true);
+            MatOfPoint2f approxCurve = new MatOfPoint2f();
+            Imgproc.approxPolyDP(contour2f, approxCurve, 0.02 * peri, true);
 
-        contourList.clear();
-        Imgproc.findContours(colorMaskMat, contourList, contourHierarchyMat,
-                Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE);
-
-        MatOfPoint largestQuadrilateral = null;
-        double largestArea = 0.0;
-
-        for (MatOfPoint contour : contourList) {
-            MatOfPoint2f contourFloat = new MatOfPoint2f(contour.toArray());
-            double peri = Imgproc.arcLength(contourFloat, true);
-            MatOfPoint2f approxCurve2f = new MatOfPoint2f();
-            Imgproc.approxPolyDP(contourFloat, approxCurve2f, 0.02 * peri, true);
-
-            int vertices = (int) approxCurve2f.total();
-            if (vertices == 4) {
-                MatOfPoint approxPolygon = new MatOfPoint(approxCurve2f.toArray());
-                if (Imgproc.isContourConvex(approxPolygon)) {
-                    double area = Math.abs(Imgproc.contourArea(approxPolygon));
-                    if (area > MIN_QUADRILATERAL_AREA && area > largestArea) {
-                        largestArea = area;
-                        if (largestQuadrilateral != null) {
-                            largestQuadrilateral.release();
-                        }
-                        largestQuadrilateral = approxPolygon;
-                    } else {
-                        approxPolygon.release();
-                    }
-                } else {
-                    approxPolygon.release();
-                }
+            int vertices = (int) approxCurve.total();
+            if (vertices >= 0 && vertices <= 4) {
+                Imgproc.drawContours(input, List.of(new MatOfPoint(approxCurve.toArray())), -1, new Scalar(255, 0, 0), 3);
+                drawCount++;
             }
 
-            contourFloat.release();
-            approxCurve2f.release();
         }
 
-        if (largestQuadrilateral != null) {
-            double angle = computeOrientation(largestQuadrilateral);
+        // update volatile count so OpMode can read it
+        detectedContourCount = drawCount;
 
-            Imgproc.drawContours(frame,
-                    Arrays.asList(largestQuadrilateral),
-                    -1,
-                    new Scalar(0, 255, 0),
-                    3);
-
-            // overlay angle text for EOCV-Sim
-            Imgproc.putText(
-                    frame,
-                    String.format("Angle: %.1f", angle),
-                    new Point(20, 40),
-                    Imgproc.FONT_HERSHEY_SIMPLEX,
-                    1.0,
-                    new Scalar(0, 255, 0),
-                    2
-            );
-
-            detectedQuadCount = 1;
-            detectedAngle = angle;
-            largestQuadrilateral.release();
-        } else {
-            detectedQuadCount = 0;
-            detectedAngle = 0.0;
-        }
-
-        morphKernel.release();
-        return frame;
+        return input;
     }
 
-    private double computeOrientation(MatOfPoint quad) {
-        MatOfPoint2f pts = new MatOfPoint2f(quad.toArray());
-        RotatedRect rr = Imgproc.minAreaRect(pts);
-        Size sz = rr.size;
-        double angle = rr.angle;
-
-        if (sz.width < sz.height) {
-            angle += 90.0;
-        }
-
-        while (angle > 180.0) angle -= 360.0;
-        while (angle <= -180.0) angle += 360.0;
-
-        pts.release();
-        return angle;
+    /**
+     * Returns the number of contours considered as squares/rectangles detected in the last processed frame.
+     */
+    public int getDetectedCount() {
+        return detectedContourCount;
     }
 
-    public int getDetectedQuadCount() {
-        return detectedQuadCount;
-    }
-
-    public double getDetectedAngle() {
-        return detectedAngle;
-    }
 }
