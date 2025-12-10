@@ -1,4 +1,3 @@
-// java
 package org.firstinspires.ftc.teamcode.kronbot.utils.detection.test;
 
 import org.opencv.core.*;
@@ -15,21 +14,17 @@ public class SquareEndGame extends OpenCvPipeline {
     private final Mat contourHierarchyMat = new Mat();
     private final List<MatOfPoint> contourList = new ArrayList<>();
 
-    // minimum area to consider (adjust as needed)
     private static final double MIN_QUADRILATERAL_AREA = 1000.0;
 
-    // HSV ranges tuned for very bright lighting to detect blue
-    // H: 100-130, S: 180-255, V: 200-255
     private static final Scalar HSV_LOWER_BLUE = new Scalar(80, 20, 100);
     private static final Scalar HSV_UPPER_BLUE = new Scalar(135, 255, 255);
 
-    // Expose a simple count of detected contours (updated each frame)
     private volatile int detectedQuadCount = 0;
+    private volatile double detectedAngle = 0.0;
 
     @Override
     public Mat processFrame(Mat frame) {
         Imgproc.cvtColor(frame, hsvMat, Imgproc.COLOR_RGB2HSV);
-        // Use named constants for the inRange bounds (tuned for bright blue)
         Core.inRange(hsvMat, HSV_LOWER_BLUE, HSV_UPPER_BLUE, colorMaskMat);
 
         Mat morphKernel = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(5, 5));
@@ -37,7 +32,8 @@ public class SquareEndGame extends OpenCvPipeline {
         Imgproc.morphologyEx(colorMaskMat, colorMaskMat, Imgproc.MORPH_CLOSE, morphKernel);
 
         contourList.clear();
-        Imgproc.findContours(colorMaskMat, contourList, contourHierarchyMat, Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE);
+        Imgproc.findContours(colorMaskMat, contourList, contourHierarchyMat,
+                Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE);
 
         MatOfPoint largestQuadrilateral = null;
         double largestArea = 0.0;
@@ -49,7 +45,6 @@ public class SquareEndGame extends OpenCvPipeline {
             Imgproc.approxPolyDP(contourFloat, approxCurve2f, 0.02 * peri, true);
 
             int vertices = (int) approxCurve2f.total();
-            // corrected: look for 4 vertices (quadrilateral)
             if (vertices == 4) {
                 MatOfPoint approxPolygon = new MatOfPoint(approxCurve2f.toArray());
                 if (Imgproc.isContourConvex(approxPolygon)) {
@@ -59,7 +54,7 @@ public class SquareEndGame extends OpenCvPipeline {
                         if (largestQuadrilateral != null) {
                             largestQuadrilateral.release();
                         }
-                        largestQuadrilateral = approxPolygon; // take ownership; do not release here
+                        largestQuadrilateral = approxPolygon;
                     } else {
                         approxPolygon.release();
                     }
@@ -73,23 +68,59 @@ public class SquareEndGame extends OpenCvPipeline {
         }
 
         if (largestQuadrilateral != null) {
-            Imgproc.drawContours(frame, Arrays.asList(largestQuadrilateral), -1, new Scalar(0, 255, 0), 3);
+            double angle = computeOrientation(largestQuadrilateral);
+
+            Imgproc.drawContours(frame,
+                    Arrays.asList(largestQuadrilateral),
+                    -1,
+                    new Scalar(0, 255, 0),
+                    3);
+
+            // overlay angle text for EOCV-Sim
+            Imgproc.putText(
+                    frame,
+                    String.format("Angle: %.1f", angle),
+                    new Point(20, 40),
+                    Imgproc.FONT_HERSHEY_SIMPLEX,
+                    1.0,
+                    new Scalar(0, 255, 0),
+                    2
+            );
+
             detectedQuadCount = 1;
+            detectedAngle = angle;
             largestQuadrilateral.release();
         } else {
             detectedQuadCount = 0;
+            detectedAngle = 0.0;
         }
 
         morphKernel.release();
-        // return the original frame (with contours drawn) so the overlays are visible
         return frame;
     }
 
-    /**
-     * Returns the number of contours considered as squares/rectangles detected in the last processed frame.
-     */
+    private double computeOrientation(MatOfPoint quad) {
+        MatOfPoint2f pts = new MatOfPoint2f(quad.toArray());
+        RotatedRect rr = Imgproc.minAreaRect(pts);
+        Size sz = rr.size;
+        double angle = rr.angle;
+
+        if (sz.width < sz.height) {
+            angle += 90.0;
+        }
+
+        while (angle > 180.0) angle -= 360.0;
+        while (angle <= -180.0) angle += 360.0;
+
+        pts.release();
+        return angle;
+    }
+
     public int getDetectedQuadCount() {
         return detectedQuadCount;
     }
 
+    public double getDetectedAngle() {
+        return detectedAngle;
+    }
 }
