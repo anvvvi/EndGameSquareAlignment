@@ -10,11 +10,17 @@ public class RedSquareDetection  extends OpenCvPipeline {
     Mat hsvMat = new Mat();
     Mat  redMat = new Mat();
 
+    Scalar lowerRed = new Scalar(140, 120, 40);
+
+    Scalar upperRed = new Scalar(160, 255, 255);
+
     @Override
     public Mat processFrame(Mat input) {
         Imgproc.cvtColor(input, hsvMat, Imgproc.COLOR_BGR2HSV);
-        Imgproc.medianBlur(hsvMat,hsvMat,5);
-        Core.inRange(hsvMat, new Scalar(140, 120, 40),new Scalar(160, 255, 255), redMat);
+        Imgproc.medianBlur(hsvMat,hsvMat,9);
+        Imgproc.GaussianBlur(hsvMat,hsvMat,new Size(9,9),0);
+        Imgproc.morphologyEx(hsvMat,hsvMat, Imgproc.MORPH_OPEN,Imgproc.getStructuringElement(Imgproc.MORPH_RECT,new Size(10,10)));
+        Core.inRange(hsvMat, lowerRed,upperRed, redMat);
         return hsvMat;
     }
 }

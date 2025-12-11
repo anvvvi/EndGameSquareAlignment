@@ -25,12 +25,17 @@ public class SquareEndGame extends OpenCvPipeline {
     @Override
     public Mat processFrame(Mat frame) {
         Imgproc.cvtColor(frame, hsvMat, Imgproc.COLOR_RGB2HSV);
-        Core.inRange(hsvMat, HSV_LOWER_BLUE, HSV_UPPER_BLUE, colorMaskMat);
 
-        Mat morphKernel = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(5, 5));
+        Imgproc.medianBlur(hsvMat,hsvMat,9);
+        Imgproc.GaussianBlur(hsvMat,hsvMat,new Size(9,9),0);
+        Mat morphKernel = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, new Size(9, 9));
+        Imgproc.morphologyEx(hsvMat, hsvMat, Imgproc.MORPH_OPEN, morphKernel);
+        Imgproc.morphologyEx(hsvMat, hsvMat, Imgproc.MORPH_CLOSE, morphKernel);
+        Core.inRange(hsvMat, HSV_LOWER_BLUE, HSV_UPPER_BLUE, colorMaskMat);
+        Imgproc.GaussianBlur(colorMaskMat,colorMaskMat,new Size(9,9),0);
+        Imgproc.medianBlur(colorMaskMat,colorMaskMat,9);
         Imgproc.morphologyEx(colorMaskMat, colorMaskMat, Imgproc.MORPH_OPEN, morphKernel);
         Imgproc.morphologyEx(colorMaskMat, colorMaskMat, Imgproc.MORPH_CLOSE, morphKernel);
-
         contourList.clear();
         Imgproc.findContours(colorMaskMat, contourList, contourHierarchyMat,
                 Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE);
@@ -96,7 +101,7 @@ public class SquareEndGame extends OpenCvPipeline {
         }
 
         morphKernel.release();
-        return frame;
+        return colorMaskMat;
     }
 
     private double computeOrientation(MatOfPoint quad) {
